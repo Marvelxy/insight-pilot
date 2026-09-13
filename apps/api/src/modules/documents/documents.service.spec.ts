@@ -15,7 +15,7 @@ function mockQueue() {
   return { getJobs: jest.fn().mockResolvedValue([]) } as unknown as import('bullmq').Queue;
 }
 
-import type { StorageService } from '../storage/storage.service';
+import { StorageService } from '../storage/storage.service';
 
 function mockStorage() {
   return { remove: jest.fn().mockResolvedValue(undefined) } as unknown as StorageService;
