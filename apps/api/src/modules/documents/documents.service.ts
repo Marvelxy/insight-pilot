@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
-import type { Queue } from 'bullmq';
+import type { Queue, Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import type { StorageService } from '../storage/storage.service';
 
@@ -67,8 +67,8 @@ export class DocumentsService {
       const jobs = await this.ingestion.getJobs();
       await Promise.all(
         jobs
-          .filter((j: any) => (j.data?.documentId) === docId)
-          .map((j: any) => j.remove?.().catch(() => undefined)),
+          .filter((j: Job) => (j.data?.documentId) === docId)
+          .map((j: Job) => j.remove?.().catch(() => undefined)),
       );
     } catch {
       // Queue unavailable in tests / dev without Redis — DB + disk cleanup still proceeds.
