@@ -16,7 +16,7 @@ function mockQueue() {
 }
 
 function mockStorage() {
-  return { remove: jest.fn().mockResolvedValue(undefined) } as unknown as import('../storage/storage.service').StorageService;
+  return { remove: jest.fn().mockResolvedValue(undefined) } as unknown as any;
 }
 
 describe('DocumentsService.remove org isolation', () => {
