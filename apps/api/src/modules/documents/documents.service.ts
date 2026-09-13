@@ -2,7 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue, Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
-import type { StorageService } from '../storage/storage.service';
+// Minimal StorageService interface for type safety
+interface StorageService {
+  remove(storageKey: string): Promise<void>;
+}
 
 @Injectable()
 export class DocumentsService {
