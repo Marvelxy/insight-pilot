@@ -15,8 +15,12 @@ function mockQueue() {
   return { getJobs: jest.fn().mockResolvedValue([]) } as unknown as import('bullmq').Queue;
 }
 
+// Minimal StorageService interface for tests
+type StorageService = { remove: (key: string) => Promise<void> };
+// No additional type needed
+
 function mockStorage() {
-  return { remove: jest.fn().mockResolvedValue(undefined) } as unknown as import('../storage/storage.service').StorageService;
+  return { remove: jest.fn().mockResolvedValue(undefined) } as unknown as StorageService;
 }
 
 describe('DocumentsService.remove org isolation', () => {

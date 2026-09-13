@@ -1,15 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
+import type { Queue, Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageService } from '../storage/storage.service';
+// Minimal StorageService interface for type safety
+interface StorageService {
+  remove(storageKey: string): Promise<void>;
+}
 
 @Injectable()
 export class DocumentsService {
   constructor(
     private prisma: PrismaService,
-    @InjectQueue('ingestion') private ingestion: Queue,
-    private storage: StorageService,
+    @InjectQueue('ingestion') private ingestion: Pick<Queue, 'add' | 'getJobs'>,
+    private storage: Pick<StorageService, 'remove'>,
   ) {}
 
   async createFromUpload(orgId: string, userId: string, input: { filename: string; mimeType: string; size: number; storageKey: string }) {
@@ -64,11 +67,11 @@ export class DocumentsService {
     // Best-effort: drop pending ingestion jobs for this doc so the
     // worker doesn't flip a deleted row to FAILED after we remove it.
     try {
-      const jobs = await this.ingestion.getJobs(['waiting', 'delayed', 'active']);
+      const jobs = await this.ingestion.getJobs();
       await Promise.all(
         jobs
-          .filter((j) => (j.data as { documentId?: string })?.documentId === docId)
-          .map((j) => j.remove().catch(() => undefined)),
+          .filter((j: Job) => (j.data?.documentId) === docId)
+          .map((j: Job) => j.remove?.().catch(() => undefined)),
       );
     } catch {
       // Queue unavailable in tests / dev without Redis — DB + disk cleanup still proceeds.
