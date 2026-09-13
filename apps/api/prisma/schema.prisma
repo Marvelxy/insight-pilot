@@ -1,0 +1,160 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+model Organization {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  createdAt   DateTime     @default(now())
+  memberships Membership[]
+  documents   Document[]
+  chunks      DocumentChunk[]
+  conversations Conversation[]
+  usage       UsageEvent[]
+  subscription Subscription?
+  apiKeys     ApiKey[]
+  evalRuns    EvalRun[]
+  auditLogs   AuditLog[]
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  name         String?
+  passwordHash String?
+  createdAt    DateTime     @default(now())
+  memberships  Membership[]
+  conversations Conversation[]
+}
+
+model Membership {
+  userId         String
+  organizationId String
+  role           Role     @default(MEMBER)
+  createdAt      DateTime @default(now())
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, organizationId])
+}
+
+model Document {
+  id             String         @id @default(cuid())
+  organizationId String
+  createdById    String
+  filename       String
+  mimeType       String
+  size           Int
+  storageKey     String
+  status         DocumentStatus @default(PENDING)
+  chunkCount     Int            @default(0)
+  createdAt      DateTime       @default(now())
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  chunks         DocumentChunk[]
+
+  @@index([organizationId, status])
+}
+
+model DocumentChunk {
+  id             String       @id @default(cuid())
+  documentId     String
+  organizationId String
+  chunkIndex     Int
+  content        String       @db.Text
+  embedding      Json?        // cosine similarity computed in app code
+  createdAt      DateTime     @default(now())
+  document       Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([documentId])
+}
+
+model Conversation {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  title          String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages       Message[]
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           String
+  content        String       @db.Text
+  citations      Json?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model UsageEvent {
+  id             String       @id @default(cuid())
+  organizationId String
+  type           String
+  quantity       Int          @default(1)
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
+
+model Subscription {
+  id             String  @id @default(cuid())
+  organizationId String  @unique
+  plan           String  @default("FREE")
+  status         String  @default("ACTIVE")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  keyHash        String       @unique
+  keyPrefix      String
+  revokedAt      DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model EvalRun {
+  id             String       @id @default(cuid())
+  organizationId String
+  score          Float
+  details        Json?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}

@@ -1,0 +1,21 @@
+{
+  "name": "insightpilot",
+  "private": true,
+  "description": "Multi-tenant AI Knowledge Platform - NestJS + Next.js + Postgres RAG",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run start:dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "build": "npm run build -w apps/api && npm run build -w apps/web",
+    "test": "npm run test -w apps/api",
+    "prisma:generate": "npm run prisma:generate -w apps/api",
+    "prisma:migrate": "npm run prisma:migrate -w apps/api",
+    "worker": "npm run start:worker -w apps/api",
+    "dev:worker": "npm run start:worker:dev -w apps/api"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

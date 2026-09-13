@@ -1,0 +1,67 @@
+# ─────────────────────────────────────────────────────────────
+# InsightPilot — installation & setup (local Postgres + Redis, no Docker)
+#
+# Usage:
+#   make -f Makefile.setup setup    # full first-time setup (default)
+#   make -f Makefile.setup <target> # or run a single step (see: help)
+# ─────────────────────────────────────────────────────────────
+.DEFAULT_GOAL := setup
+SHELL := /bin/bash
+
+API_DIR := apps/api
+WEB_DIR := apps/web
+DB_NAME ?= insightpilot
+PGUSER  ?= $(shell whoami)
+
+.PHONY: setup prereqs env install db migrate seed build test clean help
+
+setup: prereqs env install db migrate seed ## Full first-time setup
+	@echo ""
+	@echo "✓ Setup complete. Start the app with:"
+	@echo "    make start    # API on :4000 (docs at /api/docs)"
+	@echo "    make worker   # ingestion worker (2nd terminal)"
+	@echo "    make web      # web UI on :3000 (3rd terminal)"
+	@echo "  or run everything at once:  make all"
+
+prereqs: ## Check required tools (node 20+, postgres, redis)
+	@command -v node >/dev/null || (echo "✗ node not found — install Node.js 20+"; exit 1)
+	@node -e "process.exit(Number(process.versions.node.split('.')[0]) < 20 ? 1 : 0)" || (echo "✗ node 20+ required"; exit 1)
+	@command -v psql >/dev/null || (echo "✗ psql not found — install PostgreSQL 16+"; exit 1)
+	@pg_isready >/dev/null || (echo "✗ postgres not accepting connections — start it first"; exit 1)
+	@command -v redis-cli >/dev/null || (echo "✗ redis-cli not found — install Redis"; exit 1)
+	@redis-cli ping >/dev/null || (echo "✗ redis not responding — start it first"; exit 1)
+	@echo "✓ node $$(node -v), postgres + redis reachable"
+
+env: ## Create .env from example (never overwrites) + link into apps/api
+	@if [ ! -f .env ]; then cp .env.example .env && echo "✓ created .env — set OPENAI_API_KEY etc."; else echo "- .env already exists, skipping"; fi
+	@if [ ! -e $(API_DIR)/.env ]; then ln -s ../../.env $(API_DIR)/.env && echo "✓ linked $(API_DIR)/.env → ../../.env"; else echo "- $(API_DIR)/.env already linked, skipping"; fi
+
+install: ## Install dependencies (all workspaces, hoisted to root node_modules)
+	npm install --no-audit --no-fund
+
+db: ## Create database if missing (local PGUSER, no password)
+	@if psql -U $(PGUSER) -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$(DB_NAME)'" | grep -q 1; then \
+		echo "- database '$(DB_NAME)' already exists, skipping"; \
+	else \
+		psql -U $(PGUSER) -d postgres -c "CREATE DATABASE $(DB_NAME);"; \
+	fi
+
+migrate: ## Generate Prisma client + apply migrations
+	cd $(API_DIR) && npx prisma generate && npx prisma migrate dev --name init
+
+seed: ## Seed demo user + org (demo@insightpilot.dev / acme)
+	cd $(API_DIR) && npm run prisma:seed
+
+build: ## Build api + web
+	cd $(API_DIR) && npm run build
+	cd $(WEB_DIR) && npm run build
+
+test: ## Run api unit tests
+	cd $(API_DIR) && npm test -- --passWithNoTests
+
+clean: ## Remove build output + storage (keeps database)
+	rm -rf $(API_DIR)/dist $(WEB_DIR)/.next $(API_DIR)/coverage ./storage
+	@echo "✓ cleaned (database untouched)"
+
+help: ## Show this help
+	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS=":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
