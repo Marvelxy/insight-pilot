@@ -15,8 +15,9 @@ function mockQueue() {
   return { getJobs: jest.fn().mockResolvedValue([]) } as unknown as import('bullmq').Queue;
 }
 
-import type { StorageService as RealStorageService } from '../storage/storage.service';
-type StorageService = Pick<RealStorageService, 'remove'>;
+// Minimal StorageService interface for tests
+type StorageService = { remove: (key: string) => Promise<void> };
+// No additional type needed
 
 function mockStorage() {
   return { remove: jest.fn().mockResolvedValue(undefined) } as unknown as StorageService;
