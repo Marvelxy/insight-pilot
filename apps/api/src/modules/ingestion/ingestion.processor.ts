@@ -1,7 +1,11 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { Job } from 'bullmq';
+// Minimal job interface to avoid BullMQ typing issues
+interface MinimalJob {
+  data: { documentId: string };
+  updateProgress(pct: number): Promise<void>;
+}
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { AiService } from '../ai/ai.service';
@@ -32,7 +36,7 @@ export class IngestionProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<{ documentId: string }>) {
+  async process(job: MinimalJob) {
     const { documentId } = job.data;
     this.logger.log(`Processing document ${documentId}`);
 

@@ -1,4 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+
+// Minimum cosine similarity to consider a chunk relevant
+const MIN_SIMILARITY = 0.2;
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsageService } from '../usage/usage.service';
@@ -15,7 +18,7 @@ export class ChatService {
     private ai: AiService,
   ) {}
 
-  async retrieve(orgId: string, query: string, k = 6) {
+  async retrieve(orgId: string, query: string, k = 20) {
     // 1. Embed the query with the same provider used at ingest time
     let queryEmbedding: number[] | null = null;
     try {
@@ -38,31 +41,45 @@ export class ChatService {
     // e.g. HF MiniLM 384 vs OpenAI 1536 vs stub 1536).
     if (queryEmbedding) {
       let skipped = 0;
-      const scored = allChunks
+      const scoredAll = allChunks
         .map((c) => {
           const emb = c.embedding as unknown as number[] | null;
           if (!emb || emb.length !== queryEmbedding!.length) {
             skipped++;
             return null;
           }
+          const score = cosineSimilarity(queryEmbedding!, emb);
           return {
             documentId: c.documentId,
             chunkIndex: c.chunkIndex,
             content: c.content,
-            score: cosineSimilarity(queryEmbedding!, emb),
-          };
+            score,
+          } as const;
         })
         .filter((s): s is NonNullable<typeof s> => s !== null);
+
+      // First try to use chunks that meet the similarity threshold
+      const filtered = scoredAll.filter((s) => s.score >= MIN_SIMILARITY);
+      if (filtered.length > 0) {
+        filtered.sort((a, b) => b.score - a.score);
+        return filtered.slice(0, k);
+      }
+
+      // If none meet the threshold, fall back to the highest‑scoring chunks anyway
+      if (scoredAll.length > 0) {
+        this.logger.warn('No chunks above similarity threshold, using top scoring chunks');
+        scoredAll.sort((a, b) => b.score - a.score);
+        return scoredAll.slice(0, k);
+      }
+
+      this.logger.warn('No dim-compatible chunks, falling back to lexical');
       if (skipped > 0) {
         this.logger.warn(
           `${skipped} chunks skipped (embedding dim mismatch) — re-upload documents after switching AI providers`,
         );
       }
-      if (scored.length > 0) {
-        scored.sort((a, b) => b.score - a.score);
-        return scored.slice(0, k);
-      }
-      this.logger.warn('No dim-compatible chunks, falling back to lexical');
+
+      this.logger.warn('No dim-compatible chunks above similarity threshold, falling back to lexical');
     }
 
     // 4. Fallback: lexical search (match first meaningful word)
@@ -81,6 +98,27 @@ export class ChatService {
 
   async *streamAnswer(orgId: string, userId: string, conversationId: string | undefined, question: string) {
     const contexts = await this.retrieve(orgId, question);
+    // If nothing relevant was retrieved, answer explicitly that we lack information
+    if (contexts.length === 0) {
+      const conv = conversationId
+        ? await this.prisma.conversation.findFirstOrThrow({ where: { id: conversationId, organizationId: orgId } })
+        : await this.prisma.conversation.create({ data: { organizationId: orgId, userId, title: question.slice(0, 60) } });
+
+      // Record the user message even if we have no answer
+      await this.prisma.message.create({ data: { conversationId: conv.id, role: 'user', content: question } });
+
+      const answer = "I don't have enough information to answer that question based on the available documents.";
+      // Store a placeholder assistant message for completeness
+      const assistant = await this.prisma.message.create({
+        data: { conversationId: conv.id, role: 'assistant', content: answer, citations: [] as unknown as Prisma.InputJsonValue },
+      });
+      await this.usage.track(orgId, 'CHAT_QUERY', 1);
+      // Stream the answer as a single delta and mark done
+      yield `data: ${JSON.stringify({ delta: answer, sources: [], conversationId: conv.id })}\n\n`;
+      yield `data: ${JSON.stringify({ done: true, messageId: assistant.id, conversationId: conv.id })}\n\n`;
+      return;
+    }
+
     const contextBlock = contexts.map((c, i) => `[${i + 1}] doc=${c.documentId}#${c.chunkIndex} ${c.content.slice(0, 800)}`).join('\n');
 
     let conv = conversationId
@@ -88,7 +126,7 @@ export class ChatService {
       : await this.prisma.conversation.create({ data: { organizationId: orgId, userId, title: question.slice(0, 60) } });
 
     await this.prisma.message.create({ data: { conversationId: conv.id, role: 'user', content: question } });
-    const system = `You answer using ONLY the provided context. Cite sources like [1], [2]. If unsure, say you don't know.`;
+    const system = `You must answer ONLY using the provided context. Every factual statement must be directly supported by the given passages. Cite each source with the corresponding bracketed number (e.g., [1], [2]). If any part of the answer cannot be fully supported, respond with "I don't know" instead of guessing.`;
     const userPrompt = `Context:\n${contextBlock}\n\nQuestion: ${question}`;
 
     let full = '';
